@@ -228,7 +228,7 @@ export default function GuardianModePage() {
 
                 {/* ── EXPIRED (SOS TRIGGERED) ───────────────────────────────── */}
                 {state === 'expired' && (
-                    <motion.div key="expired" initial={{ opacity: 0 }} y={{ y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex flex-col items-center gap-6 py-8">
+                    <motion.div key="expired" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex flex-col items-center gap-6 py-8">
                         <div className="w-20 h-20 rounded-full flex items-center justify-center animate-pulse" style={{ background: '#ef444420' }}>
                             <div className="text-5xl">🚨</div>
                         </div>

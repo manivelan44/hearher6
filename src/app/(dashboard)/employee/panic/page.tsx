@@ -221,7 +221,7 @@ export default function PanicButtonPage() {
     const resolve = async () => {
         // Stop recording — this triggers onstop which sets recordedBlob
         if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-            // Override onstop to auto-download
+            // Override onstop to auto-download + email to HR
             mediaRecorderRef.current.onstop = () => {
                 const mimeType = mediaRecorderRef.current?.mimeType || 'video/webm';
                 const blob = new Blob(chunksRef.current, { type: mimeType });
@@ -236,6 +236,27 @@ export default function PanicButtonPage() {
                         console.error('Failed to upload panic recording', err);
                     });
                 }
+
+                // ── Email recording to HR ────────────────────────────────
+                const emailFormData = new FormData();
+                const timestamp = new Date().toISOString();
+                emailFormData.append('recording', blob, `panic-evidence-${timestamp.replace(/[:.]/g, '-')}.webm`);
+                emailFormData.append('employeeName', user?.name || 'Unknown Employee');
+                emailFormData.append('employeeEmail', user?.email || 'N/A');
+                emailFormData.append('latitude', String(location?.lat || 'N/A'));
+                emailFormData.append('longitude', String(location?.lng || 'N/A'));
+                emailFormData.append('timestamp', timestamp);
+
+                fetch('/api/send-panic-email', { method: 'POST', body: emailFormData })
+                    .then((res) => res.json())
+                    .then((data) => {
+                        if (data.success) {
+                            console.log('📧 Panic evidence emailed to HR successfully', data.testMode ? `(Test: ${data.previewUrl})` : '');
+                        } else {
+                            console.error('📧 Email API error:', data.error);
+                        }
+                    })
+                    .catch((err) => console.error('📧 Failed to email panic evidence:', err));
             };
             mediaRecorderRef.current.stop();
         }
