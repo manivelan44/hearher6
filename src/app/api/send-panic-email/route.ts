@@ -1,6 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
 
+// ─── Cache Ethereal test account at module level (created once, reused forever) ──
+let cachedTestAccount: { user: string; pass: string } | null = null;
+let cachedTestTransporter: nodemailer.Transporter | null = null;
+
+async function getTestTransporter(): Promise<{ transporter: nodemailer.Transporter; failed: boolean }> {
+    if (cachedTestTransporter) return { transporter: cachedTestTransporter, failed: false };
+    try {
+        const testAccount = await nodemailer.createTestAccount();
+        cachedTestAccount = { user: testAccount.user, pass: testAccount.pass };
+        cachedTestTransporter = nodemailer.createTransport({
+            host: 'smtp.ethereal.email',
+            port: 587,
+            secure: false,
+            auth: { user: testAccount.user, pass: testAccount.pass },
+        });
+        return { transporter: cachedTestTransporter, failed: false };
+    } catch (err) {
+        console.warn('⚠️ Ethereal rate limit hit — falling back to console-only logging');
+        // Create a JSON transport that just logs (never fails)
+        const fallback = nodemailer.createTransport({ jsonTransport: true });
+        return { transporter: fallback, failed: true };
+    }
+}
+
 export async function POST(req: NextRequest) {
     try {
         const formData = await req.formData();
@@ -16,6 +40,7 @@ export async function POST(req: NextRequest) {
         let transporter: nodemailer.Transporter;
         let recipientEmail: string;
         let isTestMode = false;
+        let isConsoleFallback = false;
 
         const smtpUser = process.env.SMTP_USER;
         const smtpPass = process.env.SMTP_PASS;
@@ -25,28 +50,20 @@ export async function POST(req: NextRequest) {
             // Production mode — use real Gmail SMTP
             transporter = nodemailer.createTransport({
                 service: 'gmail',
-                auth: {
-                    user: smtpUser,
-                    pass: smtpPass,
-                },
+                auth: { user: smtpUser, pass: smtpPass },
             });
-            recipientEmail = hrEmail || smtpUser; // Send to HR email, or fall back to sender
+            recipientEmail = hrEmail || smtpUser;
             console.log('📧 Using real SMTP (Gmail) to send panic email');
         } else {
-            // Test mode — use Ethereal (fake SMTP for development)
-            const testAccount = await nodemailer.createTestAccount();
-            transporter = nodemailer.createTransport({
-                host: 'smtp.ethereal.email',
-                port: 587,
-                secure: false,
-                auth: {
-                    user: testAccount.user,
-                    pass: testAccount.pass,
-                },
-            });
+            // Test mode — use cached Ethereal account (or console fallback)
+            const result = await getTestTransporter();
+            transporter = result.transporter;
             recipientEmail = 'hr@company.com';
             isTestMode = true;
-            console.log('🧪 Using Ethereal (test mode) — no real email will be sent');
+            isConsoleFallback = result.failed;
+            console.log(isConsoleFallback
+                ? '📋 Using console-only mode (Ethereal rate-limited)'
+                : '🧪 Using Ethereal (test mode) — no real email will be sent');
         }
 
         // ─── Build the email ─────────────────────────────────────────────────
@@ -142,6 +159,25 @@ export async function POST(req: NextRequest) {
         console.log('✅ Panic email sent! Message ID:', info.messageId);
 
         if (isTestMode) {
+            if (isConsoleFallback) {
+                // JSON transport — log the email body for debugging
+                console.log('');
+                console.log('╔════════════════════════════════════════════════════════════════╗');
+                console.log('║  📋  EMAIL LOGGED (Ethereal rate-limited, console fallback)    ║');
+                console.log('║  To:', recipientEmail);
+                console.log('║  Subject: 🚨 PANIC ALERT —', employeeName);
+                console.log('║  Recording:', file ? `${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)` : 'None');
+                console.log('║  Location:', `${latitude}, ${longitude}`);
+                console.log('╚════════════════════════════════════════════════════════════════╝');
+                console.log('');
+                return NextResponse.json({
+                    success: true,
+                    testMode: true,
+                    consoleFallback: true,
+                    message: 'Email logged to console (Ethereal rate-limited). Configure SMTP_USER/SMTP_PASS in .env.local for real emails.',
+                });
+            }
+
             const previewUrl = nodemailer.getTestMessageUrl(info);
             console.log('');
             console.log('╔════════════════════════════════════════════════════════════════╗');
